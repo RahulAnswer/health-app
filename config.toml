@@ -1,3 +1,7 @@
 [modules.liver]
 enabled = true
 order = 1
+
+[modules.heart]
+enabled = true
+order = 2
