@@ -12,20 +12,12 @@ def build_pdf(patient: PatientData, rows: list[list[str]]) -> bytes:
     story = []
 
     story.append(Paragraph("<b>Health Report</b>", styles["Title"]))
-    pinfo = (
-        f"<b>Patient:</b> {patient.name or '—'} &nbsp;&nbsp; "
-        f"<b>Sex:</b> {patient.sex or '—'} &nbsp;&nbsp; "
-        f"<b>Age:</b> {int(patient.age) if patient.age is not None else '—'}"
-    )
+    pinfo = f"<b>Patient:</b> {patient.name or '—'} &nbsp;&nbsp; <b>Sex:</b> {patient.sex or '—'} &nbsp;&nbsp; <b>Age:</b> {int(patient.age) if patient.age is not None else '—'}"
     story.append(Paragraph(pinfo, styles["Normal"]))
     story.append(Spacer(1, 8))
 
     if rows:
-        tbl = Table(
-            [["Metric", "Value", "Interpretation"]] + rows,
-            hAlign='LEFT',
-            colWidths=[130, 100, 260]
-        )
+        tbl = Table([["Metric", "Value", "Interpretation"]] + rows, hAlign='LEFT', colWidths=[130, 100, 260])
         tbl.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#eeeeee')),
             ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
@@ -33,12 +25,8 @@ def build_pdf(patient: PatientData, rows: list[list[str]]) -> bytes:
             ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#fafafa')]),
         ]))
         story.append(tbl)
-
     story.append(Spacer(1, 10))
-    story.append(Paragraph(
-        "<b>Disclaimer:</b> Screening & education only; not medical advice.",
-        styles['Italic']
-    ))
+    story.append(Paragraph("<b>Disclaimer:</b> Screening & education only; not medical advice.", styles['Italic']))
 
     doc.build(story)
     return buf.getvalue()
