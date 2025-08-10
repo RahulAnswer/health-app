@@ -13,23 +13,21 @@ except Exception:
 @dataclass
 class Parsed:
     name: Optional[str]
-    sex: Optional[str]
+    sex: Optional[str]          # normalized to "M" or "F"
     age: Optional[float]
     labs: Dict[str, float]
     flags: Dict[str, float]
 
 
-# ----------------------------
-# Patterns that extract values
-# ----------------------------
-# Existing (Liver + shared) patterns
-STRICT: Dict[str, str] = {
-    # Demographics
+# --------- patterns ---------
+# Keep existing liver-related patterns and add heart-related ones.
+STRICT = {
+    # demographics
     "name": r"(?:Patient\s*Name|Name)\s*[:\-]\s*([A-Za-z][A-Za-z\s\.\-']{1,60}?)(?=\s+(?:barcode|id|patient\s*id|\d)|$)",
     "sex": r"(?:Sex|Gender)\s*[:\-]\s*(Male|Female|M|F)",
     "age": r"(?:Age)\s*[:\-]\s*(\d{1,3})",
 
-    # Liver labs (value just before the unit)
+    # core liver
     "ast_ul": r"(?:AST|SGOT)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}(?:U/?L|IU/?L))",
     "alt_ul": r"(?:ALT|SGPT)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}(?:U/?L|IU/?L))",
     "ggt_ul": r"(?:GGT|Gamma[\-\s]*glutamyl[\-\s]*transferase)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}(?:U/?L|IU/?L))",
@@ -37,31 +35,32 @@ STRICT: Dict[str, str] = {
     "platelets": r"(?:Platelets?|Platelet\s*count)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,30}(?:10\^9/?L|10\^3/?µ?L))",
     "albumin_gdl": r"(?:Albumin)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}g/?[dD][lL])",
 
-    # ULN AST (capture the upper limit from a referenced range)
+    # ULN AST (try to read the high end of a reference range line)
     "uln_ast": r"(?:AST|SGOT)[^\n]{0,80}?(?:ref(?:erence)?\s*range|range)[^\n]{0,40}?(\d{2,3})\s*(?:U/?L|IU/?L)?",
+
+    # lipids for heart
+    "tc_mgdl": r"(?:Total\s+Cholesterol|Total\s*Cholesterol|CHOL)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,12}mg/?dL)",
+    "hdl_mgdl": r"(?:HDL[\-\s]*C|Serum\s+HDL\s+Cholesterol|HDL\s*Cholesterol)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,12}mg/?dL)",
+    "ldl_mgdl": r"(?:LDL[\-\s]*C|Serum\s+LDL\s+Cholesterol|LDL\s*Cholesterol)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,12}mg/?dL)",
+
+    # inflammation
+    "hscrp_mgL": r"(?:hs[\-\s]*CRP|high[\-\s]*sensitivity\s*C[\.\s]*R[\.\s]*P)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,12}mg/?L)",
+
+    # anchored fasting glucose – avoid grabbing ref ranges (70–100)
+    "fasting_glucose_mgdl": r"(?:Glucose[, ]*Fasting|Fasting\s*Blood\s*Sugar|Fasting\s*Glucose)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,12}mg/?dL)",
+
+    # HbA1c as % on same line
+    "hba1c_pct": r"(?:HbA1c|Hba1c)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,6}%)",
+
+    # ApoB / ApoA1
+    "apob_mgdl": r"(?:APO[\-\s]*B|Apolipoprotein\s*B)\b[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,12}mg/?dL)",
+    "apoa1_mgdl": r"(?:APO[\-\s]*A1|Apolipoprotein\s*A-?1)\b[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,12}mg/?dL)",
+
+    # eGFR / GFR, ESTIMATED
+    "egfr_ml_min": r"(?:eGFR|GFR[, ]*ESTIMATED|Estimated\s*GFR)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,30}mL/?min/?1\.?73m2)",
 }
 
-# Add Heart module patterns without touching existing ones
-STRICT_HEART: Dict[str, str] = {
-    # Lipids
-    "tc_mgdl": r"(?:Total\s+Cholesterol|Cholesterol,\s*Total|Serum\s+Total\s+Cholesterol)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}mg/?dL)",
-    "hdl_mgdl": r"(?:Serum\s+HDL\s+Cholesterol|HDL\s*-\s*C|HDL\s+Cholesterol|HDL-C)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}mg/?dL)",
-    "ldl_mgdl": r"(?:Serum\s+LDL\s+Cholesterol|LDL\s*-\s*C|LDL\s+Cholesterol|LDL-C)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}mg/?dL)",
-    "apob_mgdl": r"(?:Apolipoprotein\s*B|ApoB)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}mg/?dL)",
-    "lpa_mgdl": r"(?:Lipoprotein\s*\(a\)|Lp\(a\))[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}mg/?dL)",
-
-    # Inflammation / Glycemia
-    "hscrp_mgL": r"(?:hs-?CRP|high\s*sensitivity\s*C-?reactive\s*protein)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}mg/?L)",
-    "hba1c_pct": r"(?:HbA1c|Glycated\s*Hemoglobin)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,6}%\b)",
-    "fasting_glucose_mgdl": r"(?:Fasting\s+(?:Plasma\s+)?Glucose|FPG)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,20}mg/?dL)",
-
-    # BP / Kidney
-    "sbp_mmhg": r"(?:Systolic\s*(?:BP|Blood\s*Pressure))[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,10}mmHg)",
-    "egfr_ml_min": r"(?:eGFR|estimated\s*GFR)[^\n]{0,80}?(\d+(?:\.\d+)?)(?=[^\n]{0,30}mL/?min/1\.73\s*m\^?2?)",
-}
-STRICT.update(STRICT_HEART)
-
-# Fallback (looser) patterns for demographics
+# looser fallbacks for name/sex/age only
 LOOSE = {
     "name": r"(?:Patient\s*Name|Name)[^\n]{0,20}([A-Za-z][A-Za-z\s\.\-']{1,60}?)(?=\s+(?:barcode|id|patient\s*id|\d)|$)",
     "sex": r"(?:Sex|Gender)[^\n]{0,20}(Male|Female|M|F)",
@@ -71,18 +70,18 @@ LOOSE = {
 
 def _find(pattern: str, text: str):
     m = re.search(pattern, text, flags=re.I)
-    if m:
-        value = m.group(1).strip()
-        # Extra cleanup for name to drop trailing barcode/id
-        if pattern in (STRICT["name"], LOOSE["name"]):
-            value = re.sub(r"\s+(barcode|id|patient\s*id)\b.*$", "", value, flags=re.I).strip()
-        return value
-    return None
+    if not m:
+        return None
+    value = m.group(1).strip()
+    # name cleanup
+    if pattern in (STRICT["name"], LOOSE["name"]):
+        value = re.sub(r"\s+(barcode|id|patient\s*id)\b.*$", "", value, flags=re.I).strip()
+    return value
 
 
 def parse_pdf() -> Parsed:
     name = sex = None
-    age = None
+    age: Optional[float] = None
     labs: Dict[str, float] = {}
     flags: Dict[str, float] = {}
 
@@ -102,22 +101,30 @@ def parse_pdf() -> Parsed:
                 raw_text = ""
 
         if raw_text:
-            # normalise whitespace a bit
+            # collapse whitespace but keep line structure
             t = re.sub(r"[^\S\r\n]+", " ", raw_text, flags=re.M)
 
-            # --- Demographics ---
+            # --- demographics ---
             name = _find(STRICT["name"], t) or _find(LOOSE["name"], t)
-            sex = _find(STRICT["sex"], t) or _find(LOOSE["sex"], t)
+
+            sex_raw = _find(STRICT["sex"], t) or _find(LOOSE["sex"], t)
+            if sex_raw:
+                s0 = sex_raw.strip().lower()
+                if s0.startswith("m"):
+                    sex = "M"
+                elif s0.startswith("f"):
+                    sex = "F"
+
             a = _find(STRICT["age"], t) or _find(LOOSE["age"], t)
             try:
                 age = float(a) if a else None
             except Exception:
                 age = None
 
-            # --- ULN AST (prefer range upper if present) ---
+            # --- special handling for ULN AST reference ranges (like "40 - 60 U/L") ---
             ULN_RANGE_PATTERNS = [
                 r"(?:AST|SGOT)[^\n]*?U/?L[^\n]*?(\d{1,3})\s*[-–‐]\s*(\d{2,3})",
-                r"(?:AST|SGOT)[^\n]*?(?:ref(?:erence)?\s*(?:range|interval)|bio\.?\s*ref.*?|range)[^\n]*?(\d{1,3})\s*[-–‐]\s*(\d{2,3})",
+                r"(?:AST|SGOT)[^\n]*?(?:ref(?:erence)?\s*(?:range|interval)|bio\.?\s*ref.*?|range)[^\n]*?(\d{1,3})\s*[-–‐]\s*(\d{2,3})"
             ]
             for pat in ULN_RANGE_PATTERNS:
                 m = re.search(pat, t, flags=re.I)
@@ -126,22 +133,27 @@ def parse_pdf() -> Parsed:
                     labs["uln_ast"] = float(max(lo_v, hi_v))
                     break
 
-            # --- All other lab values (skip uln_ast if already set above) ---
-            for key in [k for k in STRICT.keys() if k not in ("name", "sex", "age")]:
+            # --- extract individual analytes ---
+            for key, pat in STRICT.items():
+                if key in ("name", "sex", "age", "uln_ast"):
+                    # already handled above (and ULN done separately to prefer range logic)
+                    continue
                 if key == "uln_ast" and "uln_ast" in labs:
                     continue
-                m = re.search(STRICT[key], t, flags=re.I)
+                m = re.search(pat, t, flags=re.I)
                 if m:
                     try:
                         labs[key] = float(m.group(1))
                     except Exception:
                         pass
 
-            # Albumin: convert g/L -> g/dL if needed
+            # albumin may be in g/L on some reports — convert to g/dL if so
             if "albumin_gdl" in labs:
                 m = re.search(r"Albumin[^\n]{0,40}?(\d+(?:\.\d+)?)\s*(g/?dL|g/?L)", t, flags=re.I)
-                if m and "g/L" in m.group(2).replace(" ", "").lower():
-                    labs["albumin_gdl"] = labs["albumin_gdl"] / 10.0
+                if m:
+                    unit = m.group(2).replace(" ", "").lower()
+                    if "g/l" in unit:
+                        labs["albumin_gdl"] = labs["albumin_gdl"] / 10.0
 
         # Show what we got
         if name or sex or age or labs:
